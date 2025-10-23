@@ -33,39 +33,58 @@ function Layout () {
 
 
 function App() {
-  const { theme } = useStore();
-const isloading = false; // or set to true if you want to show loading
+  // guard against useStore() being null/undefined during startup
+  const store = useStore() || {};
+  const isLoading = store?.isLoading ?? false;
+  const setIsLoading = typeof store?.setIsLoading === "function" ? store.setIsLoading : null;
+  const user = store?.user ?? null;
+
+  // helper to run async work and toggle loader only when setter exists
+  const withLoader = async (workFn) => {
+    try {
+      setIsLoading && setIsLoading(true);
+      return await workFn();
+    } finally {
+      setIsLoading && setIsLoading(false);
+    }
+  };
 
   // Apply theme class to <html> for Tailwind dark mode
   useEffect(() => {
     const root = window.document.documentElement;
-    if (theme === "dark") {
+    if (store?.theme === "dark") {
       root.classList.add("dark");
     } else {
       root.classList.remove("dark");
     }
-  }, [theme]);
+  }, [store?.theme]);
 
   return (
-    <main>
-      <div className="w-full min-h-screen relative bg-white dark:bg-[#020b19]">
-        <Routes>
-          <Route element={<Layout />}> 
-            <Route path="/" element={<Home />} />
-            <Route path="/category" element={<CategoriesPage />} />
-            <Route path="/live" element={<Live />} />
-            <Route path="/:slug/:id?" element={<BlogDetails />} />
-            <Route path="/writer/:id" element={<WriterPage />} />
-            <Route path="/contact" element={<Contact />} />
-            <Route path="/about" element={<About />} /> {/* Add this line */}
-          </Route>
-          {/* Auth routes */}
-          <Route path="/sign-up" element={<SignupPage />} />
-          <Route path="/sign-in" element={<LoginPage />} />
-        </Routes>
-        {isloading && <Loading/>}
+    <>
+      {/* global loader shown only when store.isLoading is true */}
+      {isLoading && <div className="global-loader">Loading…</div>}
+
+      <div className="App">
+        <main>
+          <div className="w-full min-h-screen relative bg-white dark:bg-[#020b19]">
+            <Routes>
+              <Route element={<Layout />}> 
+                <Route path="/" element={<Home />} />
+                <Route path="/category" element={<CategoriesPage />} />
+                <Route path="/live" element={<Live />} />
+                <Route path="/:slug/:id?" element={<BlogDetails />} />
+                <Route path="/writer/:id" element={<WriterPage />} />
+                <Route path="/contact" element={<Contact />} />
+                <Route path="/about" element={<About />} /> {/* Add this line */}
+              </Route>
+              {/* Auth routes */}
+              <Route path="/sign-up" element={<SignupPage />} />
+              <Route path="/sign-in" element={<LoginPage />} />
+            </Routes>
+          </div>
+        </main>
       </div>
-    </main>
+    </>
   );
 }
 

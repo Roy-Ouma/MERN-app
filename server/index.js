@@ -14,7 +14,8 @@ const app = express();
 const PORT = process.env.PORT || 8800;
 
 app.use(helmet());
-app.use(cors());
+app.use(cors()); // DEV: allow all origins. Replace with strict config in production.
+// app.options('*', cors()); // removed — cors() handles preflights
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.json({ limit: "30mb" }));

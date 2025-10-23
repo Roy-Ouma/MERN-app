@@ -1,6 +1,7 @@
 import { useGoogleLogin } from '@react-oauth/google';
 import React, { useEffect, useState } from "react";
 import { BiImages} from "react-icons/bi";
+import { AiFillEye, AiFillEyeInvisible } from "react-icons/ai";
 import { Toaster, toast } from "sonner";
 import { Link } from "react-router-dom";
 import { FcGoogle} from "react-icons/fc";
@@ -12,10 +13,17 @@ import Inputbox from "../components/Inputbox";
 import { getGoogleSignUp, emailSignUp } from "../utils/apiCalls";
 import useStore from "../store";
 import { saveUserInfo } from "../utils/index";
+import { uploadFile } from "../utils/index";
+
 
 
 const SignupPage = () => {
-  const {user, signIn, setIsLoading} = useStore();
+  // guard against useStore() returning null/undefined during startup
+  const store = useStore() || {};
+  const user = store?.user ?? null;
+  const signIn = store?.signIn ?? (() => {});
+  const setIsLoading = store?.setIsLoading ?? (() => {});
+
   const [showForm, setShowForm] = useState(false);
   const [Data, setData] = useState({
    firstname: "",
@@ -25,8 +33,25 @@ const SignupPage = () => {
     confirmpassword: "",
     profile: ""
   });
-  const [file, setFile] = useState('');
+  const [file, setFile] = useState(null);
   const [fileURL, setFileURL] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  // quick confirm-password check (non-submitting)
+  const confirmPassword = (e) => {
+    // prevent accidental form submit if used inside form
+    if (e && typeof e.preventDefault === "function") e.preventDefault();
+    if (!Data.password || !Data.confirmpassword) {
+      toast.error("Please enter both password fields to confirm.");
+      return;
+    }
+    if (Data.password === Data.confirmpassword) {
+      toast.success("Passwords match.");
+    } else {
+      toast.error("Passwords do not match.");
+    }
+  };
 
     const handleChange = (e) => {
     const { name, value } = e.target;
@@ -39,11 +64,10 @@ const SignupPage = () => {
 
    const GoogleLogin = useGoogleLogin({
     onSuccess: async (tokenResponse) => {
+      const setLoading = typeof setIsLoading === "function" ? setIsLoading : null;
       try {
-        setIsLoading(true);
-        const userResp = await getGoogleSignUp(tokenResponse.access_token);
-
-        setIsLoading(false);
+        setLoading && setLoading(true);
+        const userResp = await getGoogleSignUp(tokenResponse?.access_token);
 
         if (userResp?.success === true) {
           // signIn is provided by the store; persist the authenticated user
@@ -51,11 +75,12 @@ const SignupPage = () => {
           if (userResp.token) window.location.replace("/");
           toast.success("Account created successfully!");
         } else {
-          toast.error(userResp?.message || 'Google Sign-Up failed. Please try again.');
+          toast.error(userResp?.message || "Google Sign-Up failed. Please try again.");
         }
       } catch (err) {
-        setIsLoading(false);
-        toast.error('Google Sign-Up failed. Please try again.');
+        toast.error("Google Sign-Up failed. Please try again.");
+      } finally {
+        setLoading && setLoading(false);
       }
     },
     onError: () => {
@@ -65,36 +90,89 @@ const SignupPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    try {
-      setIsLoading(true);
-      const result = await emailSignUp(Data, file);
-      setIsLoading(false);
+    // prevent double submits
+    if (handleSubmit.__running) return;
+    handleSubmit.__running = true;
 
-      if (result?.success) {
-        signIn(result);
-        if (result.token) window.location.replace("/");
-        toast.success("Account created successfully!");
+    const setLoading = typeof setIsLoading === "function" ? setIsLoading : null;
+
+    // basic client validation
+    if (Data.password !== Data.confirmpassword) {
+      toast.error("Passwords do not match.");
+      handleSubmit.__running = false;
+      return;
+    }
+
+    try {
+      setLoading && setLoading(true);
+
+      // ensure image is uploaded and we have a remote URL (uploadFile may return the url)
+      let imageUrl = fileURL;
+      if (file) {
+        try {
+          const uploadResult = await uploadFile(setFileURL, file);
+          // prefer explicit return from uploadFile if provided
+          if (typeof uploadResult === "string" && uploadResult.length) imageUrl = uploadResult;
+        } catch (err) {
+          toast.error("Image upload failed. Please try again or continue without an image.");
+          // continue without aborting submission
+        }
+      }
+
+      const result = await emailSignUp({ ...Data, image: imageUrl });
+
+      if (result?.success === true) {
+        saveUserInfo(result, signIn);
       } else {
-        toast.error(result?.message || 'Sign up failed. Please try again.');
+        toast.error(result?.message || "Sign up failed. Please try again.");
       }
     } catch (err) {
-      setIsLoading(false);
-      toast.error('Sign up failed. Please try again.');
+      toast.error("Sign up failed. Please try again.");
+    } finally {
+      setLoading && setLoading(false);
+      handleSubmit.__running = false;
     }
   };
+   
+  // redirect only when user becomes available and has a token
+  useEffect(() => {
+    if (user && user.token) {
+      window.location.replace("/");
+    }
+  }, [user]);
 
+  // upload when `file` changes
+  useEffect(() => {
+    let objectUrl;
+    const setLoading = typeof setIsLoading === "function" ? setIsLoading : null;
+    if (file) {
+      // show local preview quickly
+      try {
+        objectUrl = URL.createObjectURL(file);
+        setFileURL(objectUrl);
+      } catch {}
+
+      (async () => {
+        try {
+          setLoading && setLoading(true);
+          await uploadFile(setFileURL, file);
+        } catch (err) {
+          toast.error("Image upload failed.");
+        } finally {
+          setLoading && setLoading(false);
+        }
+      })();
+    }
+
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [file]);
   
 
   return (
     <div className="flex w-full h-[100vh]">
       <div className="hidden md:flex flex-col gap-y-4 w-1/3 min-h-screen bg-black items-center justify-center">
-        {fileURL && (
-          <img
-            src={fileURL}
-            alt=""
-            className="w-16 h-16 rounded-full"
-          />
-        )}
         <Logo type="Sign-in" />
         <span className="text-xl font-semibold text-white text-center">
           Welcome!
@@ -144,15 +222,7 @@ const SignupPage = () => {
                     onChange={handleChange}
                     isRequired={true}
                   />
-                  <Inputbox
-                    type="password"
-                    label="Password"
-                    name="password"
-                    isRequired={true}
-                    value={Data.password}
-                    placeholder="Password"
-                    onChange={handleChange}
-                  />
+
                   <Inputbox
                     type="email"
                     label="Email"
@@ -162,27 +232,100 @@ const SignupPage = () => {
                     placeholder="Enter Your Email"
                     onChange={handleChange}
                   />
+                  <div className="relative">
+                    <Inputbox
+                      type={showPassword ? "text" : "password"}
+                      label="Password"
+                      name="password"
+                      isRequired={true}
+                      value={Data.password}
+                      placeholder="Password"
+                      onChange={handleChange}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((s) => !s)}
+                      className="absolute right-3 top-9 text-gray-600"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <AiFillEyeInvisible /> : <AiFillEye />}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 relative">
+                      <Inputbox
+                        type={showConfirmPassword ? "text" : "password"}
+                        label="Confirm Password"
+                        name="confirmpassword"
+                        isRequired={true}
+                        value={Data.confirmpassword}
+                        placeholder="Confirm Password"
+                        onChange={handleChange}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword((s) => !s)}
+                        className="absolute right-3 top-9 text-gray-600"
+                        aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+                      >
+                        {showConfirmPassword ? <AiFillEyeInvisible /> : <AiFillEye />}
+                      </button>
+                    </div>
+                    <div className="pt-6">
+                      <Button
+                        type="button"
+                        onClick={confirmPassword}
+                        label="Confirm"
+                        styles="px-3 py-2 text-sm rounded-full bg-gray-200 text-black hover:bg-gray-300"
+                      />
+                    </div>
+                  </div>
                   <div className="flex items-center justify-between
                   py-4">
-                    <label htmlFor="imgUpload" className="flex items-centre gap-1 text-base text-black
-                   dark:text-gray-500 cursor-pointer">
-                    <input
-                      id="imgUpload"
-                      type="file"
-                      onChange={(e) => {
-                        setFile(e.target.files[0]);
-                        setFileURL(URL.createObjectURL(e.target.files[0]));
-                      }}
-                      className="hidden"
-                      data-max-size= "1024"
-                      accept="image/*"
-                    />
-                    <BiImages />
-                    <span>Picture</span>
-                   </label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        id="imgUpload"
+                        type="file"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (!f) return;
+                          setFile(f);
+                          // local preview until upload completes; navbar will use persisted user.profile after sign-in
+                          try {
+                            setFileURL(URL.createObjectURL(f));
+                          } catch {}
+                        }}
+                        className="hidden"
+                        data-max-size="1024"
+                        accept="image/*"
+                      />
 
-                  </div>
-                  </div>
+                      <label
+                        htmlFor="imgUpload"
+                        className="flex items-center gap-2 text-base text-black dark:text-gray-500 cursor-pointer select-none"
+                        onClick={(e) => {
+                          // keep label behavior but ensure input receives click in all browsers
+                          e.preventDefault();
+                          document.getElementById("imgUpload")?.click();
+                        }}
+                      >
+                        <BiImages />
+                        <span>{file ? "Upload Picture" : "Upload picture"}</span>
+                      </label>
+
+                      {/* optional explicit Change button that also opens the file picker */}
+                      {file && (
+                        <button
+                          type="button"
+                          onClick={() => document.getElementById("imgUpload")?.click()}
+                          className="px-3 py-1 text-sm rounded-full bg-gray-200 text-black hover:bg-gray-300"
+                        >
+                          Change
+                        </button>
+                      )}
+                    </div>
+                   </div>
                    <div className=" flex items-centre justify-centre text-gray-600 dark:text-gray-300">
                                 <p>
                                   Already have an account?{" "}
@@ -201,6 +344,7 @@ const SignupPage = () => {
               />
               
 
+                  </div>
                </form> ): (
                 <div className="max-w-md w-full space-y-8">
                <Button 

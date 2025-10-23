@@ -1,4 +1,8 @@
 import axios from 'axios';
+const api = axios.create({
+  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api',
+  withCredentials: true // if your server uses cookies/auth
+});
 
 export const API_BASE_URL = 'http://localhost:8800/api';
 
@@ -32,35 +36,7 @@ export const getGoogleSignUp = async (accessToken) => {
 };
 
 // emailSignUp: accepts FormData or plain object. If FormData, convert to JSON (ignore binary file on client->server for now).
-export const emailSignUp = async (data) => {
-  try {
-    let payload;
-    let headers = {};
-
-    if (data instanceof FormData) {
-      // convert to plain object, ignore file binary (server accepts profile as URL or skip)
-      payload = {};
-      for (const [key, value] of data.entries()) {
-        if (key === 'profile') {
-          // skip file binary; if you want to upload file, add multer on server and send FormData directly
-          continue;
-        }
-        payload[key] = value;
-      }
-      headers['Content-Type'] = 'application/json';
-    } else {
-      payload = data;
-      headers['Content-Type'] = 'application/json';
-    }
-
-    const res = await axios.post(`${API_BASE_URL}/auth/signup`, payload, { headers });
-    return res.data;
-  } catch (error) {
-    const err = error?.response?.data || error?.response || error;
-    console.error('Error during Email Sign-Up:', err);
-    return { error: err };
-  }
-};
+export const emailSignUp = (data) => api.post('/signup', data);
 
 // client -> server Google sign-in (server will verify token with Google)
 export async function getGoogleSignIn(accessToken) {
